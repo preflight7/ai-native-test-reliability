@@ -1,0 +1,14 @@
+{
+  "name": "ai-native-test-reliability-slice1",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bundle": "node harness/bundle-library.js",
+    "test:translator": "node harness/translate-locator.test.js",
+    "trial": "node harness/run_trials.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.47.0"
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "id": "excalidraw-menu-toggle",
+  "title": "Toggle Excalidraw main menu open then closed",
+  "kind": "positive",
+  "goal": "the main menu opens on first click and closes on second click",
+  "steps": [
+    {
+      "action": "navigate",
+      "url": "http://localhost:3001/"
+    },
+    {
+      "action": "click",
+      "target": "main menu trigger (open)",
+      "_anchor": {
+        "stepId": "openMenu",
+        "intent": null,
+        "action": "click",
+        "value": null,
+        "target": {
+          "descriptor": {
+            "role": {
+              "v": "button",
+              "st": 0.9
+            },
+            "tag": {
+              "v": "button",
+              "st": 0.5
+            },
+            "type": {
+              "v": "button",
+              "st": 0.7
+            },
+            "testid": {
+              "v": "main-menu-trigger",
+              "st": 0.95
+            },
+            "id": {
+              "v": "radix-:r2:",
+              "st": 0.2
+            },
+            "cls": {
+              "v": "dropdown-menu-button main-menu-trigger zen-mode-transition",
+              "st": 0.2
+            }
+          },
+          "bestLocator": "[data-testid='main-menu-trigger']",
+          "uniqueAtRecord": true,
+          "confidence": 76
+        },
+        "scope": {
+          "visibleOnly": true,
+          "container": null,
+          "ordinal": null
+        },
+        "reveal": [],
+        "framePath": [],
+        "actionability": {
+          "requireVisible": true,
+          "requireTopmostAtPoint": true,
+          "requireFiniteBox": true
+        },
+        "verify": {
+          "type": null,
+          "expect": null
+        },
+        "flag": null
+      }
+    },
+    {
+      "action": "click",
+      "target": "main menu trigger (close)",
+      "_anchor": {
+        "stepId": "closeMenu",
+        "intent": null,
+        "action": "click",
+        "value": null,
+        "target": {
+          "descriptor": {
+            "role": {
+              "v": "button",
+              "st": 0.9
+            },
+            "tag": {
+              "v": "button",
+              "st": 0.5
+            },
+            "type": {
+              "v": "button",
+              "st": 0.7
+            },
+            "testid": {
+              "v": "main-menu-trigger",
+              "st": 0.95
+            },
+            "id": {
+              "v": "radix-:r2:",
+              "st": 0.2
+            },
+            "cls": {
+              "v": "dropdown-menu-button main-menu-trigger zen-mode-transition",
+              "st": 0.2
+            }
+          },
+          "bestLocator": "[data-testid='main-menu-trigger']",
+          "uniqueAtRecord": true,
+          "confidence": 76
+        },
+        "scope": {
+          "visibleOnly": true,
+          "container": null,
+          "ordinal": null
+        },
+        "reveal": [],
+        "framePath": [],
+        "actionability": {
+          "requireVisible": true,
+          "requireTopmostAtPoint": true,
+          "requireFiniteBox": true
+        },
+        "verify": {
+          "type": null,
+          "expect": null
+        },
+        "flag": null
+      }
+    }
+  ],
+  "verify": {
+    "type": "elementGone",
+    "sentinel": "[data-testid=\"dropdown-menu\"]"
+  }
+}

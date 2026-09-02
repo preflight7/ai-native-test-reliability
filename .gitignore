@@ -1,0 +1,13 @@
+# Local target repo — cloned separately by anyone reproducing (see PLAN.md for pinned SHA)
+target_repo/
+
+# Node deps
+node_modules/
+package-lock.json
+
+# Derived bundle (rebuild with: node harness/bundle-library.js)
+logs/selfheal-bundle.js
+
+# Playwright ephemera
+/test-results/
+/playwright-report/
