@@ -26,6 +26,10 @@
               "v": "button",
               "st": 0.5
             },
+            "name": {
+              "v": "Menu",
+              "st": 0.5
+            },
             "type": {
               "v": "button",
               "st": 0.7
@@ -45,7 +49,7 @@
           },
           "bestLocator": "[data-testid='main-menu-trigger']",
           "uniqueAtRecord": true,
-          "confidence": 76
+          "confidence": 73
         },
         "scope": {
           "visibleOnly": true,
@@ -84,6 +88,10 @@
               "v": "button",
               "st": 0.5
             },
+            "name": {
+              "v": "Menu",
+              "st": 0.5
+            },
             "type": {
               "v": "button",
               "st": 0.7
@@ -103,7 +111,7 @@
           },
           "bestLocator": "[data-testid='main-menu-trigger']",
           "uniqueAtRecord": true,
-          "confidence": 76
+          "confidence": 73
         },
         "scope": {
           "visibleOnly": true,

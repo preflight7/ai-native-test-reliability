@@ -53,7 +53,7 @@ async function matchInPage(page, anchor) {
 //   { id: 'A1' | 'B1' | ..., expectedOutcome: 'PASS'|'FAILED'|'ABSTAIN', driftKind: 'restyle'|'appbug'|... }
 // `test` shape (our extension of the library's authored-test):
 //   { id, goal, steps: [{action, url?, _anchor?}], verify: {type, sentinel} }
-export async function runTrial({ page, test, mutation, trialId, targetSha, libSha }) {
+export async function runTrial({ page, test, mutation, trialId, targetSha, libSha, eventMode = 'trusted' }) {
   const startTime = Date.now();
   let outcome, verify_confidence, category, diagnosis = null;
   let healed = false;
@@ -91,7 +91,7 @@ export async function runTrial({ page, test, mutation, trialId, targetSha, libSh
       }, originalLocator);
       if (stillResolvesUniquely === false || match.bestLocator !== originalLocator) {
         healed = true;
-        firstTry = firstTry === false ? false : false;
+        firstTry = false;
       } else if (stillResolvesUniquely === true && firstTry !== false) {
         firstTry = true;
       }
@@ -173,7 +173,7 @@ export async function runTrial({ page, test, mutation, trialId, targetSha, libSh
       trial_id: trialId,
       mutation_id: mutation ? mutation.id : null,
       expected_outcome: mutation ? mutation.expectedOutcome : null,
-      event_mode: 'trusted',
+      event_mode: eventMode,
       target_sha: targetSha,
       library_sha: libSha,
       latency_ms,

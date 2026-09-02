@@ -1,12 +1,11 @@
 diff --git a/packages/excalidraw/components/main-menu/MainMenu.tsx b/packages/excalidraw/components/main-menu/MainMenu.tsx
 --- a/packages/excalidraw/components/main-menu/MainMenu.tsx
 +++ b/packages/excalidraw/components/main-menu/MainMenu.tsx
-@@ -49,7 +49,7 @@ export const MainMenu = Object.assign(
+@@ -48,6 +48,7 @@ export const MainMenu = Object.assign(
+                   openDialog: null,
                  });
                }}
-               aria-label="Menu"
--              data-testid="main-menu-trigger"
-+              data-testid="menu-trigger-v2"
++              aria-label="Menu"
+               data-testid="main-menu-trigger"
                className="main-menu-trigger"
              >
-               {HamburgerMenuIcon}
