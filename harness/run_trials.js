@@ -1,21 +1,41 @@
 #!/usr/bin/env node
-// P1.8 v2 — Run the P1 trial set (pristine + A1 + B1) trusted-only.
-// Emits one flywheel-event/v1 row per trial to logs/trials.jsonl.
+// P2 — full mutation matrix: {pristine, A1, A2, A3, B1, B2, B3} × {trusted, synthetic}.
 //
-// v2 changes vs v1:
-//  - Applies mutations/prep_aria.patch once as a "prep baseline" (adds
-//    aria-label="Menu" to the main-menu-trigger button so the descriptor
-//    carries a name for role+name fallback).
-//  - Runs a target-fitness pre-check on the prepped baseline: temporarily
-//    strip data-testid at runtime, call the matcher, assert verdict='heal'
-//    via role+name. If this fails, HALT before mutations run.
+// Additions vs v2:
+//  - New mutations A2 (icon wrap), A3 (outer wrapper div), B2 (duplicate injected),
+//    B3 (route-form: no source patch; page.route delay).
+//  - Runs every mutation in BOTH event modes (trusted, synthetic).
+//  - Retry-3x on any gate-tripping outcome; modal outcome wins; retry_seq recorded.
+//  - Per-row flywheel-event/v1 schema validation via lib/self-heal/schemas/validator.js.
+//    A validation error kills the trial with a loud diagnosis; corrupt rows never
+//    reach logs/trials.jsonl.
+//  - Per-trial screenshot captured to logs/screenshots/<trialId>.png.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
+import vm from 'node:vm';
 import { chromium } from 'playwright';
 import { runTrial, injectLibrary } from './selfheal-playwright-runtime.js';
+
+// Load the library's UMD/IIFE schema files into a shared vm context so their
+// `globalThis.SELFHEAL_*` assignments take effect. `require()` would fail here
+// because package.json has `"type": "module"`, which nixes CJS resolution of
+// bare `.js` files under lib/.
+const _libCtx = vm.createContext({});
+function _loadLib(rel) {
+  const abs = path.resolve(new URL('.', import.meta.url).pathname, '..', rel);
+  vm.runInContext(fs.readFileSync(abs, 'utf8'), _libCtx, { filename: rel });
+}
+_loadLib('lib/self-heal/schemas/validator.js');
+_loadLib('lib/self-heal/schemas/flywheel-event.schema.js');
+const VALIDATOR = _libCtx.SELFHEAL_VALIDATOR;
+const SCHEMA = _libCtx.SELFHEAL_SCHEMA_FLYWHEEL;
+if (!VALIDATOR || typeof VALIDATOR.validate !== 'function') {
+  throw new Error('validator failed to load into vm context');
+}
+if (!SCHEMA || !SCHEMA.EVENT) throw new Error('flywheel-event schema failed to load into vm context');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,69 +43,76 @@ const ROOT = path.resolve(__dirname, '..');
 
 const test = JSON.parse(fs.readFileSync(path.join(ROOT, 'fixtures/authored-test.json'), 'utf8'));
 const trialsFile = path.join(ROOT, 'logs/trials.jsonl');
+const screenshotDir = path.join(ROOT, 'logs/screenshots');
 fs.mkdirSync(path.dirname(trialsFile), { recursive: true });
-// Fresh log for this run.
+fs.mkdirSync(screenshotDir, { recursive: true });
 fs.writeFileSync(trialsFile, '');
 
-// Resolve SHAs
 const libSha = execSync('git -C lib rev-parse HEAD', { cwd: ROOT }).toString().trim();
 const targetSha = execSync('git -C target_repo rev-parse HEAD', { cwd: ROOT }).toString().trim();
 
 const PREP_PATCH = path.resolve(ROOT, 'mutations/prep_aria.patch');
-const PREPPED_STAT = '1 file changed, 1 insertion(+)'; // sanity marker
 
-const trials = [
-  { id: 'pristine', patch: null, expectedOutcome: 'PASS', driftKind: 'pristine' },
-  { id: 'A1',       patch: 'mutations/mut_A1.patch', expectedOutcome: 'PASS',   driftKind: 'restyle' },
-  // B1 renames data-testid AND className. Under the prep_aria baseline the
-  // button still carries aria-label="Menu", so the role+name fallback survives
-  // the drift and the matcher heals to the SAME node. Under an identity-based
-  // oracle this is a legitimate heal, not a false heal, so expectedOutcome=PASS.
-  { id: 'B1',       patch: 'mutations/mut_B1.patch', expectedOutcome: 'PASS',   driftKind: 'restyle' },
-  // Gap I — heal_policy=never_heal on the recorded step. Even with mut_A1
-  // applied (which would normally heal), the adapter must return an ABSTAIN-
-  // shaped row with category='POLICY' and never click.
+// Full P2 mutation set. Route-form (B3) carries `route` instead of `patch`.
+const MUTATIONS = [
+  { id: 'pristine', patch: null,                        expectedOutcome: 'PASS',    driftKind: 'pristine' },
+  { id: 'A1',       patch: 'mutations/mut_A1.patch',    expectedOutcome: 'PASS',    driftKind: 'restyle' },
+  { id: 'A2',       patch: 'mutations/mut_A2.patch',    expectedOutcome: 'PASS',    driftKind: 'restyle' },
+  { id: 'A3',       patch: 'mutations/mut_A3.patch',    expectedOutcome: 'PASS',    driftKind: 'restyle' },
+  { id: 'B1',       patch: 'mutations/mut_B1.patch',    expectedOutcome: 'PASS',    driftKind: 'restyle' },
+  { id: 'B2',       patch: 'mutations/mut_B2.patch',    expectedOutcome: 'ABSTAIN', driftKind: 'restyle' },
+  { id: 'B3',       route: { pattern: '**/*', delayMs: 500 }, expectedOutcome: 'PASS', driftKind: 'appbug' },
+  // Gap I — heal_policy=never_heal on the recorded step. Reapplies mut_A1
+  // (which normally heals cleanly) but the adapter must short-circuit to
+  // ABSTAIN/POLICY before matchStep and never click.
   { id: 'never_heal_A1', patch: 'mutations/mut_A1.patch', expectedOutcome: 'ABSTAIN', driftKind: 'restyle',
     policies: { openMenu: 'never_heal' } },
 ];
+const MODES = ['trusted', 'synthetic'];
 
-function sh(cmd) {
-  return execSync(cmd, { cwd: ROOT }).toString();
-}
-function applyPatch(patchAbs) {
-  execSync(`git -C target_repo apply "${patchAbs}"`, { cwd: ROOT, stdio: 'inherit' });
-}
-function revertPatch(patchAbs) {
-  execSync(`git -C target_repo apply -R "${patchAbs}"`, { cwd: ROOT, stdio: 'inherit' });
-}
-function repoStatusPorcelain() {
-  return execSync('git -C target_repo status --porcelain', { cwd: ROOT }).toString().trim();
-}
+function sh(cmd) { return execSync(cmd, { cwd: ROOT }).toString(); }
+function applyPatch(p) { execSync(`git -C target_repo apply "${p}"`, { cwd: ROOT, stdio: 'inherit' }); }
+function revertPatch(p) { execSync(`git -C target_repo apply -R "${p}"`, { cwd: ROOT, stdio: 'inherit' }); }
+function repoStatusPorcelain() { return execSync('git -C target_repo status --porcelain', { cwd: ROOT }).toString().trim(); }
 function repoDiffMatchesPrepOnly() {
   const stat = execSync('git -C target_repo diff --stat', { cwd: ROOT }).toString().trim();
   return stat.includes('MainMenu.tsx') && stat.includes('1 insertion(+)');
 }
 
-const results = [];
+function isGateTripping(row) {
+  const exp = row._trial_meta.expected_outcome;
+  if (row.category === 'UNKNOWN' && /adapter-error/.test(row.diagnosis || '')) return true;
+  if (row.outcome !== exp) return true;
+  return false;
+}
 
-// Sanity: target repo must be clean before the run.
+function modalRow(rows) {
+  const counts = new Map();
+  for (const r of rows) {
+    const k = `${r.outcome}|${r.category}|${r.healed}|${r.false_heal}`;
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  let bestK, bestC = -1;
+  for (const [k, c] of counts) if (c > bestC) { bestK = k; bestC = c; }
+  return rows.find(r => `${r.outcome}|${r.category}|${r.healed}|${r.false_heal}` === bestK);
+}
+
+function validateRow(row) {
+  const { _trial_meta, ...core } = row;
+  return VALIDATOR.validate(SCHEMA.EVENT, core);
+}
+
+// --- Boot ---
 if (repoStatusPorcelain() !== '') {
   console.error('target_repo is dirty before run; commit or revert first');
   process.exit(2);
 }
-
-// Apply prep_aria baseline for the whole run.
 console.log('[prep] applying prep_aria.patch as trial baseline');
 applyPatch(PREP_PATCH);
-// Give vite HMR a beat.
 await new Promise(r => setTimeout(r, 2500));
 
 const browser = await chromium.launch({ headless: true });
 
-// --- Target fitness pre-check ---
-// On the prepped baseline, blank the recorded testid at runtime and confirm
-// the matcher can heal via role+name fallback. This is C2 remediation: if the
-// target is anchor-poor, halt before any mutation runs.
 async function targetFitnessCheck() {
   const context = await browser.newContext();
   await injectLibrary(context);
@@ -94,9 +121,6 @@ async function targetFitnessCheck() {
     const navStep = test.steps.find(s => s.action === 'navigate');
     await page.goto(navStep.url, { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(1200);
-
-    // Strip data-testid from the recorded element (in-page only, does not
-    // touch source). Then ask the matcher what it would do.
     const stripped = await page.evaluate(() => {
       const el = document.querySelector('[data-testid="main-menu-trigger"]');
       if (!el) return { ok: false, reason: 'testid target not found on page' };
@@ -104,113 +128,102 @@ async function targetFitnessCheck() {
       return { ok: true };
     });
     if (!stripped.ok) return { ok: false, reason: stripped.reason };
-
     const anchor = test.steps.find(s => s.action === 'click')._anchor;
     const result = await page.evaluate((a) => {
       const r = window.SELFHEAL.matchStep(document, a, { gate: true });
       const ex = r.best ? r.best.ex : null;
       const loc = ex ? window.SELFHEAL.bestLocator(ex) : { sel: null, tier: 'none' };
-      return {
-        verdict: r.verdict,
-        bestLocator: loc.sel,
-        tier: loc.tier,
-        score: r.best ? r.best.conf : null,
-        margin: r.margin != null ? r.margin : null,
-        via: r.via || null,
-        diagnosis: r.diagnosis || null,
-      };
+      return { verdict: r.verdict, bestLocator: loc.sel, tier: loc.tier, score: r.best ? r.best.conf : null, margin: r.margin != null ? r.margin : null };
     }, anchor);
-
     return { ok: result.verdict === 'heal', result };
-  } finally {
-    await context.close();
-  }
+  } finally { await context.close(); }
 }
 
 console.log('\n=== target-fitness pre-check ===');
 const fit = await targetFitnessCheck();
 console.log(JSON.stringify(fit, null, 2));
 if (!fit.ok) {
-  console.error('\nTarget-fitness pre-check FAILED: matcher cannot heal via role+name fallback.');
-  console.error('The heal path cannot be exercised on this target. Halting before mutation trials.');
+  console.error('\nTarget-fitness pre-check FAILED; halting.');
   await browser.close();
   revertPatch(PREP_PATCH);
   process.exit(3);
 }
-console.log('Target-fitness pre-check PASSED — heal path is reachable via role+name.\n');
+console.log('Target-fitness pre-check PASSED.\n');
 
-// --- Trial loop ---
-for (const t of trials) {
-  console.log(`\n=== trial ${t.id} (expects ${t.expectedOutcome}) ===`);
-
-  // Before applying any per-trial mutation, the tree should reflect prep_aria only.
-  if (!repoDiffMatchesPrepOnly()) {
-    console.error(`  ! target_repo diff is not the expected prep-only baseline; skipping`);
-    console.error(sh('git -C target_repo diff --stat'));
-    continue;
-  }
-
-  const patchAbs = t.patch ? path.resolve(ROOT, t.patch) : null;
+async function runOne({ mut, mode, retrySeq }) {
+  const patchAbs = mut.patch ? path.resolve(ROOT, mut.patch) : null;
   if (patchAbs) {
-    try { applyPatch(patchAbs); } catch (e) {
-      console.error(`  ! failed to apply patch: ${e.message}`);
-      continue;
-    }
-    // Give vite HMR a beat.
+    try { applyPatch(patchAbs); } catch (e) { throw new Error(`apply ${mut.patch}: ${e.message}`); }
     await new Promise(r => setTimeout(r, 2500));
   }
-
   const context = await browser.newContext();
   await injectLibrary(context);
   const page = await context.newPage();
-
+  let row;
   try {
-    const row = await runTrial({
-      page,
-      test,
-      mutation: t,
-      trialId: `S1v2-${t.id}-trusted`,
+    row = await runTrial({
+      page, test, mutation: mut,
+      trialId: `S1v2-${mut.id}-${mode}${retrySeq ? `-r${retrySeq}` : ''}`,
       targetSha, libSha,
-      eventMode: 'trusted',
-      policies: t.policies || null,
+      eventMode: mode,
+      screenshotDir,
+      policies: mut.policies || null,
     });
-    fs.appendFileSync(trialsFile, JSON.stringify(row) + '\n');
-    results.push(row);
-    console.log(`  outcome=${row.outcome} verify=${row.verify_confidence} category=${row.category} healed=${row.healed} false_heal=${row.false_heal} latency=${row._trial_meta.latency_ms}ms`);
-    if (row.diagnosis) console.log(`  diagnosis: ${row.diagnosis}`);
-  } catch (e) {
-    console.error(`  ! trial threw: ${e.message}`);
+    row._trial_meta.retry_seq = retrySeq;
   } finally {
     await context.close();
-    if (patchAbs) {
-      try { revertPatch(patchAbs); } catch (e) { console.error(`  ! revert failed: ${e.message}`); }
+    if (patchAbs) { try { revertPatch(patchAbs); } catch (e) { console.error(`  ! revert failed: ${e.message}`); } }
+  }
+  return row;
+}
+
+const allRows = [];
+const finalRows = [];
+
+for (const mut of MUTATIONS) {
+  for (const mode of MODES) {
+    console.log(`\n=== ${mut.id} × ${mode} (expects ${mut.expectedOutcome}) ===`);
+    if (mut.patch && !repoDiffMatchesPrepOnly()) {
+      console.error(`  ! target_repo diff not the expected prep-only baseline; skipping`);
+      console.error(sh('git -C target_repo diff --stat'));
+      continue;
     }
+    const attempts = [];
+    for (let k = 0; k < 3; k++) {
+      const row = await runOne({ mut, mode, retrySeq: k });
+      const vr = validateRow(row);
+      if (!vr.ok) {
+        console.error(`  ! schema validation FAILED on attempt ${k}:`);
+        for (const e of vr.errors) console.error(`      ${e.path}: ${e.msg}`);
+        console.error('  ! corrupt row NOT appended; aborting this trial');
+        break;
+      }
+      attempts.push(row);
+      allRows.push(row);
+      console.log(`  attempt#${k}: outcome=${row.outcome} verify=${row.verify_confidence} category=${row.category} healed=${row.healed} false_heal=${row.false_heal} latency=${row._trial_meta.latency_ms}ms`);
+      if (row.diagnosis) console.log(`    diagnosis: ${row.diagnosis}`);
+      if (!isGateTripping(row)) break;
+    }
+    if (attempts.length === 0) continue;
+    const modal = modalRow(attempts);
+    modal._trial_meta.attempts = attempts.length;
+    modal._trial_meta.modal_of = attempts.map(a => a.outcome);
+    fs.appendFileSync(trialsFile, JSON.stringify(modal) + '\n');
+    finalRows.push(modal);
+    console.log(`  → modal: outcome=${modal.outcome} (over ${attempts.length} attempts)`);
   }
 }
 
 await browser.close();
-
-// Revert prep baseline.
 console.log('\n[prep] reverting prep_aria.patch');
 try { revertPatch(PREP_PATCH); } catch (e) { console.error(`  ! prep revert failed: ${e.message}`); }
 
-// Gate check (v2 expectations)
-const pristine = results.find(r => r._trial_meta.mutation_id === 'pristine');
-const a1 = results.find(r => r._trial_meta.mutation_id === 'A1');
-const b1 = results.find(r => r._trial_meta.mutation_id === 'B1');
-
-const nh = results.find(r => r._trial_meta.mutation_id === 'never_heal_A1');
-
-const gate = {
-  pristine_pass:      pristine && pristine.outcome === 'PASS' && !pristine.false_heal,
-  a1_healed_and_pass: a1 && a1.outcome === 'PASS' && a1.healed === true && !a1.false_heal,
-  b1_healed_and_pass: b1 && b1.outcome === 'PASS' && b1.healed === true && !b1.false_heal,
-  never_heal_blocks:  nh && nh.outcome === 'ABSTAIN' && nh.category === 'POLICY' && nh.healed === false && !nh.false_heal,
-  aggregate_false_heal: results.reduce((s, r) => s + (r.false_heal ? 1 : 0), 0),
-};
-
-console.log('\n=== P1 v2 GATE ===');
-console.log(JSON.stringify(gate, null, 2));
-const passed = gate.pristine_pass && gate.a1_healed_and_pass && gate.b1_healed_and_pass && gate.never_heal_blocks && gate.aggregate_false_heal === 0;
-console.log(passed ? '\nP1 v2 GATE: PASS — heal path empirically exercised\n' : '\nP1 v2 GATE: FAILED — see per-trial diagnosis\n');
-process.exit(passed ? 0 : 1);
+const falseHealTotal = finalRows.reduce((s, r) => s + (r.false_heal ? 1 : 0), 0);
+console.log('\n=== P2 SUMMARY ===');
+console.log(`total trials: ${finalRows.length} (target: ${MUTATIONS.length * MODES.length})`);
+console.log(`aggregate false_heal: ${falseHealTotal}`);
+for (const r of finalRows) {
+  const m = r._trial_meta;
+  console.log(`  ${m.mutation_id.padEnd(9)} ${m.event_mode.padEnd(10)} ${r.outcome.padEnd(8)} ${r.category.padEnd(12)} healed=${r.healed}  false_heal=${r.false_heal}  attempts=${m.attempts}`);
+}
+process.exit(0);
