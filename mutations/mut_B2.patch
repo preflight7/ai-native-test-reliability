@@ -1,0 +1,17 @@
+diff --git a/packages/excalidraw/components/main-menu/MainMenu.tsx b/packages/excalidraw/components/main-menu/MainMenu.tsx
+--- a/packages/excalidraw/components/main-menu/MainMenu.tsx
++++ b/packages/excalidraw/components/main-menu/MainMenu.tsx
+@@ -55,6 +55,13 @@ export const MainMenu = Object.assign(
+             >
+               {HamburgerMenuIcon}
+             </DropdownMenu.Trigger>
++            <button
++              type="button"
++              aria-label="Menu"
++              data-testid="main-menu-trigger"
++              className="main-menu-trigger"
++              style={{ position: "absolute", top: 0, right: 0, width: 20, height: 20 }}
++            >dup</button>
+             <DropdownMenu.Content
+               onClickOutside={() => setAppState({ openMenu: null })}
+               onSelect={composeEventHandlers(onSelect, () => {

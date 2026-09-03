@@ -1,0 +1,19 @@
+diff --git a/packages/excalidraw/components/main-menu/MainMenu.tsx b/packages/excalidraw/components/main-menu/MainMenu.tsx
+--- a/packages/excalidraw/components/main-menu/MainMenu.tsx
++++ b/packages/excalidraw/components/main-menu/MainMenu.tsx
+@@ -41,6 +41,7 @@ export const MainMenu = Object.assign(
+       return (
+         <MainMenuTunnel.In>
+           <DropdownMenu open={appState.openMenu === "canvas"}>
++            <div className="wrapper">
+             <DropdownMenu.Trigger
+               onToggle={() => {
+                 setAppState({
+@@ -55,6 +56,7 @@ export const MainMenu = Object.assign(
+             >
+               {HamburgerMenuIcon}
+             </DropdownMenu.Trigger>
++            </div>
+             <DropdownMenu.Content
+               onClickOutside={() => setAppState({ openMenu: null })}
+               onSelect={composeEventHandlers(onSelect, () => {
