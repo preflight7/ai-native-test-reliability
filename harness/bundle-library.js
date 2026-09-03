@@ -37,7 +37,15 @@ function readOrFail(rel) {
 }
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
-const bundle = files.map(readOrFail).join('\n;\n');
+let bundle = files.map(readOrFail).join('\n;\n');
+// Vendor-name scrub — this is a generic SaaS. Redact any competitor / customer
+// brand names that leaked in via upstream comments (the library was written for
+// a specific deployment; we don't want its example strings echoing into our
+// output). Case-insensitive whole-word matches, comment-safe.
+const VENDOR_NAMES = ['testsigma', 'gong', 'amplitude', 'appsmith', 'immich', 'salesforce'];
+for (const name of VENDOR_NAMES) {
+  bundle = bundle.replace(new RegExp(`\\b${name}\\b`, 'gi'), 'REDACTED');
+}
 fs.writeFileSync(OUT, bundle);
 
 const globals = ['SELFHEAL', 'SELFHEAL_FALSEHEAL', 'SELFHEAL_SCHEMA_FLYWHEEL', 'SELFHEAL_CANDGEN',

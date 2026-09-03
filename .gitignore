@@ -11,3 +11,6 @@ logs/selfheal-bundle.js
 # Playwright ephemera
 /test-results/
 /playwright-report/
+
+# Per-trial screenshots — regenerated on every run, not worth git bloat
+logs/screenshots/
