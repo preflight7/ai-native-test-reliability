@@ -42,6 +42,11 @@ const trials = [
   // the drift and the matcher heals to the SAME node. Under an identity-based
   // oracle this is a legitimate heal, not a false heal, so expectedOutcome=PASS.
   { id: 'B1',       patch: 'mutations/mut_B1.patch', expectedOutcome: 'PASS',   driftKind: 'restyle' },
+  // Gap I — heal_policy=never_heal on the recorded step. Even with mut_A1
+  // applied (which would normally heal), the adapter must return an ABSTAIN-
+  // shaped row with category='POLICY' and never click.
+  { id: 'never_heal_A1', patch: 'mutations/mut_A1.patch', expectedOutcome: 'ABSTAIN', driftKind: 'restyle',
+    policies: { openMenu: 'never_heal' } },
 ];
 
 function sh(cmd) {
@@ -167,6 +172,7 @@ for (const t of trials) {
       trialId: `S1v2-${t.id}-trusted`,
       targetSha, libSha,
       eventMode: 'trusted',
+      policies: t.policies || null,
     });
     fs.appendFileSync(trialsFile, JSON.stringify(row) + '\n');
     results.push(row);
@@ -193,15 +199,18 @@ const pristine = results.find(r => r._trial_meta.mutation_id === 'pristine');
 const a1 = results.find(r => r._trial_meta.mutation_id === 'A1');
 const b1 = results.find(r => r._trial_meta.mutation_id === 'B1');
 
+const nh = results.find(r => r._trial_meta.mutation_id === 'never_heal_A1');
+
 const gate = {
   pristine_pass:      pristine && pristine.outcome === 'PASS' && !pristine.false_heal,
   a1_healed_and_pass: a1 && a1.outcome === 'PASS' && a1.healed === true && !a1.false_heal,
   b1_healed_and_pass: b1 && b1.outcome === 'PASS' && b1.healed === true && !b1.false_heal,
+  never_heal_blocks:  nh && nh.outcome === 'ABSTAIN' && nh.category === 'POLICY' && nh.healed === false && !nh.false_heal,
   aggregate_false_heal: results.reduce((s, r) => s + (r.false_heal ? 1 : 0), 0),
 };
 
 console.log('\n=== P1 v2 GATE ===');
 console.log(JSON.stringify(gate, null, 2));
-const passed = gate.pristine_pass && gate.a1_healed_and_pass && gate.b1_healed_and_pass && gate.aggregate_false_heal === 0;
+const passed = gate.pristine_pass && gate.a1_healed_and_pass && gate.b1_healed_and_pass && gate.never_heal_blocks && gate.aggregate_false_heal === 0;
 console.log(passed ? '\nP1 v2 GATE: PASS — heal path empirically exercised\n' : '\nP1 v2 GATE: FAILED — see per-trial diagnosis\n');
 process.exit(passed ? 0 : 1);
