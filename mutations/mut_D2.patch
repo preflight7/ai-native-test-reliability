@@ -1,0 +1,12 @@
+diff --git a/packages/excalidraw/components/main-menu/MainMenu.tsx b/packages/excalidraw/components/main-menu/MainMenu.tsx
+--- a/packages/excalidraw/components/main-menu/MainMenu.tsx
++++ b/packages/excalidraw/components/main-menu/MainMenu.tsx
+@@ -50,7 +50,7 @@
+               }}
+               aria-label="Menu"
+               data-testid="main-menu-trigger"
+-              className="main-menu-trigger"
++              className="menu-trigger-v2-cls"
+             >
+               {HamburgerMenuIcon}
+             </DropdownMenu.Trigger>
