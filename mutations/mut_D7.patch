@@ -1,0 +1,12 @@
+diff --git a/packages/excalidraw/components/main-menu/MainMenu.tsx b/packages/excalidraw/components/main-menu/MainMenu.tsx
+--- a/packages/excalidraw/components/main-menu/MainMenu.tsx
++++ b/packages/excalidraw/components/main-menu/MainMenu.tsx
+@@ -48,7 +48,7 @@
+                   openDialog: null,
+                 });
+               }}
+-              aria-label="Menu"
++              aria-label="Options"
+               data-testid="main-menu-trigger"
+               className="main-menu-trigger"
+             >

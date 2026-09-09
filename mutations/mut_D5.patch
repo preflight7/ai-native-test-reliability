@@ -1,0 +1,11 @@
+diff --git a/packages/excalidraw/components/main-menu/MainMenu.tsx b/packages/excalidraw/components/main-menu/MainMenu.tsx
+--- a/packages/excalidraw/components/main-menu/MainMenu.tsx
++++ b/packages/excalidraw/components/main-menu/MainMenu.tsx
+@@ -49,7 +49,6 @@
+                 });
+               }}
+               aria-label="Menu"
+-              data-testid="main-menu-trigger"
+               className="main-menu-trigger"
+             >
+               {HamburgerMenuIcon}
