@@ -34,17 +34,29 @@ export async function injectLibrary(context) {
 // a SEPARATE derivation via SELFHEAL.bestLocator(ex), not a field on `best`.
 async function matchInScope(scope, anchor) {
   return await scope.evaluate((a) => {
-    const r = window.SELFHEAL.matchStep(document, a, { gate: true });
-    const ex = r.best ? r.best.ex : null;
-    const loc = ex ? window.SELFHEAL.bestLocator(ex) : { sel: null, tier: 'none' };
+    // matchAndEmit (2026-09-09) collapses matchStep + bestLocator into one path
+    // that also enforces uniqueness on the emitted selector against the current
+    // DOM. Fixes the ambiguity-firewall gap where an ancestor testid inherited
+    // from a component-library primitive would emit an ambiguous selector.
+    const emit = window.SELFHEAL.matchAndEmit || null;
+    const r = emit
+      ? emit(document, a, { gate: true })
+      : (() => {
+          // Fallback for older bundles without matchAndEmit.
+          const s = window.SELFHEAL.matchStep(document, a, { gate: true });
+          const ex = s.best ? s.best.ex : null;
+          const loc = ex ? window.SELFHEAL.bestLocator(ex) : { sel: null, tier: 'none' };
+          return { ...s, bestLocator: loc.sel, tier: loc.tier };
+        })();
     return {
       verdict: r.verdict,
-      bestLocator: loc.sel,
-      tier: loc.tier,
+      bestLocator: r.bestLocator,
+      tier: r.tier,
       score: r.best ? r.best.conf : null,
       margin: r.margin != null ? r.margin : null,
       via: r.via || null,
       diagnosis: r.diagnosis || null,
+      emitCount: r.emitCount != null ? r.emitCount : null,
     };
   }, anchor);
 }

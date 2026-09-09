@@ -68,8 +68,18 @@ Two candidates:
 
 ## Recommended next moves
 
-1. Land the library-side fix (`matchAndEmit` with cardinality check). Add a targeted regression test: recorded descriptor with unique testid → mutate DOM so testid is now shared by 2 elements → expect abstain, not heal.
-2. Fix the identity comparator in `compare_matrix.js` to use `await locator.elementHandle()` + evaluate on that node, so cross-drift same-element claims become trustworthy.
-3. Re-run D5 to confirm outcome flips from `adapter-error` to `ABSTAIN/AMBIGUITY`.
+1. ~~Land the library-side fix~~ **DONE 2026-09-09.** `matchAndEmit(doc, step, opts)` added to `selfheal-core.js`: runs `matchStep`, then if verdict=heal computes `bestLocator(vd.best.ex)`, checks `doc.querySelectorAll(sel).length`, and downgrades to abstain with `diagnosis:'ambiguous-emit'` and `emitCount` when >1. Regression tests E8.matchAndEmit-{ambiguous,unique} added to `selfheal-tests.js`. Adapter `selfheal-playwright-runtime.js#matchInScope` now calls `matchAndEmit` (with fallback to legacy path for older bundles).
+2. **Re-run D5 confirms fix.** L outcomes flipped from `adapter-error` (Playwright strict-mode violation, opaque) → `ABSTAIN` with diagnosis `matcher abstain at step openMenu` (library's own vocabulary). All other drifts unchanged — the fix is precise. New numbers in `logs/matrix_d1_d8.jsonl`; the 7×3 grid is unchanged in heal-rate but the D5 failure mode is now correct (loud, named, in the right vocabulary).
+3. **Still TODO:** fix the identity comparator in `compare_matrix.js` to use `await locator.elementHandle()` + evaluate on that node, so cross-drift same-element claims become trustworthy on D4 and future drifts where accessible-name-change makes the JS mirror blind.
 4. **Do NOT proceed to D9-D17 yet.** Structural + text drifts will multiply the D4 comparator problem across more cells; running them with a broken comparator produces more numbers, not more knowledge.
-5. After 1-3 land, design the "hold testid, drift everything else" matrix — the only shape that can produce a positive library-value story.
+5. After (3) lands, design the "hold testid, drift everything else" matrix — the only shape that can produce a positive library-value story.
+
+## D5 outcome, post-fix
+
+| path | pre-fix | post-fix | note |
+|---|---|---|---|
+| L | FAILED (adapter-error, strict-mode violation) | ABSTAIN (`matcher abstain at step openMenu`, `diagnosis:ambiguous-emit`, `emitCount:2`) | Library refuses the heal cleanly. |
+| N | 5/5 PASS | 5/5 PASS | Unchanged — `getByRole('button',{name:'Menu'})` still resolves via aria-label. |
+| S | 0/5 FAILED (timeout) | 0/5 FAILED (timeout) | Unchanged — original testid is gone. |
+
+The heal-rate is still 0/5 for L. That is CORRECT — no unambiguous heal is available when the recorded testid is deleted and the winner's inherited testid is shared. The fix's contribution is making the failure honest: the library says "I can't safely heal this" instead of shipping an ambiguous selector to Playwright and crashing.
