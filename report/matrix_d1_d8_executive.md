@@ -28,29 +28,38 @@
 
 **False-heal count (fallback: expectation-vs-outcome, no attribute-hash oracle inlined this run):** 0 detected. L PASS cells all clicked the same physical button via a testid that still resolved uniquely to the trigger. The identity hashes in `logs/matrix_d1_d8.jsonl` are consistent within each drift class for L.
 
-## Verdict
+## Verdict (revised 2026-09-09 after self-redteam — the prior verdict oversold the library)
 
-- **Library > Naive on 3 drifts:** D6, D7, D8. When the aria-label is renamed/removed, or when a `role` override kills `getByRole('button')`, the library still heals via testid; the naive `getByRole` locator times out.
-- **Library ≈ Naive on 2 drifts:** D1, D4. Both paths reach the same physical button 5/5 (or on D4, N reaches *some* button that also toggles the sentinel — see surprises).
-- **Library ≈ Naive ≈ Strict on 1 drift:** D2 (className rename is inert for this test — testid still resolves; the drift didn't actually shift the anchor).
-- **Library < Naive on 1 drift:** D5 (see below).
+**Read the S column, not just the L/N delta.** On D6/D7/D8 the strict recorded testid selector passes 5/5 — because those drifts touch aria/role, NOT testid. The library "wins" those cells by echoing the still-valid testid, not by healing. The 3 drifts where L > N are the 3 drifts where **S > N identically**. That's a locator-strategy result (testid as anchor beats aria as anchor when aria drifts), not a library capability.
 
-**Story shifted from A1-only view.** After A1 (D1) alone the story was "Library ≈ Naive". Broadening to attribute deletions and role overrides shows a real positive gap: L survives 3 drift classes N cannot. But L also has a **clear negative** on D5.
+- **L, S both beat N on 3 drifts:** D6, D7, D8 — testid preserved; naive `getByRole` breaks under aria/role drift; library and plain strict testid selector both work. No healing was necessary.
+- **L, N, S all pass on 2 drifts:** D1 (L emits a rename of the testid — Playwright would need it too) and D2 (className rename is inert; testid still resolves for all three paths).
+- **L, N both pass; S fails on 1 drift:** D1 (repeated for clarity — testid rename is where L and N converge on the same physical element via different anchors).
+- **L fails, N passes, S fails on 1 drift:** D5 (see below — potential ambiguity-firewall bug in the library, needs code verification).
+
+**The library-value question on attribute drift is unresolved by this matrix.** No cell demonstrates a heal that a plain strict locator on the preserved testid didn't already achieve. D6/D7/D8 do NOT extend the A1 (Library ≈ Naive) story into a positive-value story; they just show what happens when aria drifts while testid holds.
+
+The next matrix that could resolve this: **hold testid unchanged and drift everything else** (className, aria, role, structure, text). Under those conditions L, N, and S diverge in ways that separate healing from anchor stickiness. This block did the opposite — drifted the anchor and asked whether other anchors survive.
 
 ## Surprises worth escalating
 
-1. **D5 — Library fails ambiguity check.** When `data-testid` is deleted, the healer serializes to the underlying radix component's testid `dropdown-menu-button` — which matches TWO buttons on the page (main menu trigger AND `More tools` trigger). Playwright's strict mode throws; adapter records `adapter-error`. **This is exactly the ambiguity-firewall condition** — the library should refuse the heal rather than emit an ambiguous selector. It does not (or the refuse fires later than the emit that fed strict-click). The library ranking picked a wider anchor because the recorded anchors were both gone, and did not check the selector's page-wide cardinality before returning it.
+1. **D5 — Potential library ambiguity-firewall bug (UNVERIFIED against library source).** When `data-testid` is deleted, the healer serializes to the underlying radix component's testid `dropdown-menu-button`, which matches TWO buttons on the page. Playwright strict-mode throws 5/5. This *looks like* a missing page-wide cardinality check before selector emit, but the claim needs to be verified against `selfheal-core.js`'s `bestLocator`/`matchStep` code before being labeled a bug — the library may have an ambiguity guard downstream of the emit that we didn't observe, or a documented "abstain-when-ambiguous" branch that isn't firing here for a specific reason. Do not cite as a defect until code inspection confirms.
 
-2. **D4 — Naive still passes when aria-label is renamed to "Application menu".** `page.getByRole('button', {name:'Menu'})` PASSes 5/5 even though we changed the label. This means Playwright's accessible name computation is matching *something* on the page (candidates: the `HamburgerMenuIcon` SVG child's aria-label, a title attribute, or an as-yet-unidentified second "Menu" button). Whatever it is, it DOES successfully toggle the same dropdown sentinel — the sentinel toggle check passed. Worth an inspection pass: is Excalidraw exposing a second element with accessible name "Menu" that the JS-mirrored identity check doesn't see? If yes, the D4 result is "N accidentally survived", not "N is robust to aria drift". Recommend confirming before drawing a durable conclusion.
+2. **D4 — "N passed" is a comparator artifact, not a robustness finding.** The identity comparator is a JS mirror in `page.evaluate` that filters `buttons` by `aria-label === "Menu"` — after the rename it sees nothing, so N's identity captures as `null` and same-elem shows 0/0. Playwright's accessible-name computation walks child text / aria-labelledby / title, which the mirror doesn't reproduce. Until the comparator is fixed to use `await locator.elementHandle()` + evaluate on THAT node, cross-drift same-element claims (including this one) are unsafe. Don't cite D4's "N=5/5" as evidence of anything until the comparator is fixed and rerun.
 
 3. **D2 — inert drift.** Renaming the className changes nothing observable from the test's perspective; even S passes 5/5. This drift class does not exercise anything the test relies on. Keep as a control — it confirms unrelated attribute churn doesn't harm any path.
 
-## Recommendation
+## Recommendation (redteam-corrected)
 
-**Halt for user review before proceeding to D9-D17.** Two reasons:
+**Halt for user review before proceeding to D9-D17.** Three reasons, in priority order:
 
-- D5's outcome contradicts the "ambiguity firewall" narrative for the library. That is either a real bug in the healer or a gap in what the firewall's supposed to prevent, and it's worth naming and understanding before broadening the matrix into structural / text drifts where similar ambiguity conditions will recur.
-- D4's naive-pass may or may not be genuine robustness. The identity comparator needs a fix (capture identity via the Playwright locator's `elementHandle`, not a JS mirror) before we can trust same-element claims across drifts where the accessible name changes.
+1. **Verify D5 by code inspection first (~15 min).** Read `selfheal-core.js`'s `bestLocator`/`matchStep` to confirm or refute the missing-cardinality-check hypothesis. If it's a real bug, the library is *worse* than plain strict-testid on that drift and we need to name that. If it's not, D5 is just "the recorded testid was the only unique anchor and it's gone."
+2. **Fix the identity comparator** to use `await locator.elementHandle()` + evaluate on that node. Until then, cross-drift same-element claims (D4 and any future drift that touches aria/text) are unsafe.
+3. **Design the next matrix to hold testid unchanged.** Drift className, aria, role, structure, text — everything *except* the recorded anchor. That's the matrix that separates healing from anchor stickiness. This block did the opposite (drifted the anchor, asked whether other anchors survive) — which is a Playwright locator question, not a library question.
+
+## Aggregate false-heal note
+
+The "0 false-heal" number uses the weak expectation-vs-outcome fallback, not the R.1 attribute-hash oracle. Do not cite it as evidence. The R.1 oracle rewrite is still deferred.
 
 ## Reproduce
 
