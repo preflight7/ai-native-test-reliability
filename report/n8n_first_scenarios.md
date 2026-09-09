@@ -69,3 +69,36 @@ Why the library ties: n8n's execute button carries hashed Element Plus classes (
 
 1. **Fix the `WEB.candidates` filter** on `feature/heal-policy` — extend to include test-id-bearing elements regardless of role. Small; unblocks most of n8n's UI.
 2. **Try a scenario where library SHOULD beat naive on n8n** — e.g., a sidebar `menu-item` that shares its testid with other menu items (real ambiguity that `getByRole` can't resolve without ordinal or scope). If library abstains cleanly there while naive picks the wrong one, that's a real value story.
+
+## Step 4 (added 2026-09-10) — WEB.candidates fix + rerun on workflow-name-input
+
+Extended `WEB.candidates` on `feature/heal-policy` to also include `[data-testid], [data-test-id], [data-test], [data-cy]` elements regardless of role. Committed as `dc5a87f` on the fork, submodule pointer bumped as `96747ac`.
+
+**Verification:** candidate pool grew from ~30 to 180 elements on n8n's workflow editor; the workflow-name span is now included.
+
+**Rerun of N-A1 on workflow-name-input:**
+
+| path | 3/3 outcome | detail |
+|---|---|---|
+| L | 0/3 ABSTAIN, score 0.596, margin 0, diagnosis `no-identity` | Matcher now SCORES the drifted span (was 0 before). Score below 0.62 heal threshold and ties with other same-role spans → K8 correct abstain |
+| N (my fallback list) | 3/3 PASS via `span[data-test-id*="workflow-name"]` | Only worked because the fallback list included a heuristic that assumes drift preserves the recorded name substring — not a fair comparison |
+| S | 0/3 FAIL | testid drifted |
+
+**Honest read:** Fix #2 does what it was supposed to — the matcher can now see the span, scores it, and abstains via K8 discipline instead of blind-failing with `no-identity, score=0`. That's attribution improvement, not a heal capability improvement. On a truly anchor-poor element (span with no name/class/id, only a testid), no descriptor-based strategy can uniquely re-identify it once the testid drifts.
+
+**Naive path's "win" is misleading** — it succeeded via a substring guess on the drifted testid, which in a real Claude+PW cycle would be a manual DOM-inspection step first. A fair naive comparison (`getByRole` only) would fail 0/3 here too. On a truly anchor-poor element, neither approach heals; the plugin at least abstains with named attribution.
+
+**Cumulative library state after 4 steps:**
+- `feature/heal-policy` @ `dc5a87f`: matchAndEmit + heal_policy + data-test-id + widened candidate pool
+- Two integration issues found + fixed
+- Zero heals successfully executed on n8n so far — every trial has been L=0/3 abstain
+- Naive `getByRole` beats or ties L on every n8n trial tested so far
+
+## Where value would show on n8n (untested, hypothesized)
+
+The plugin's positive-value stories from Excalidraw haven't yet been exercised on n8n:
+- **Compounding (C1-shape)** — same drift, brain caches, run 6 short-circuits matcher. Would need an element whose emit selector is a real anchor.
+- **Identity oracle catch (B2-shape)** — imposter injection with same testid but different identity. Plugin's identity oracle catches it while naive silently clicks the wrong element.
+- **Named-abstain attribution (B1-shape)** — already showing on every abstain above. On n8n, abstain messages ("no-identity", "ambiguous-emit") give Claude a specific diagnosis PW-alone doesn't.
+
+None of these are cold-start heal wins. They're the plugin's honest value envelope, and n8n hasn't invalidated them — but n8n also hasn't produced a new positive-value story yet.
